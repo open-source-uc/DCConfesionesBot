@@ -15,6 +15,7 @@ def id_generator():
         yield n
         n += 1
 
+
 messages = {}
 template_admin = "*Nuevo Mensaje\tid:* {}\n{}"
 template_public = "*DCConfesión #{} * \n{}"
@@ -34,6 +35,7 @@ def send_message(texto, id_, markdown=False):
 
     return requests.get(url, params=(params))
 
+
 admin_group = int(os.environ["admin_group"])
 public_gruop = int(os.environ["public_gruop"])
 channel = int(os.environ["channel"])
@@ -51,16 +53,19 @@ def telegram_bot():
         if "edited_message" not in json.loads(flask.request.data):
             # Solo cuando le mandan un nuevo mensaje
 
-            chat_id = int(json.loads(flask.request.data)["message"]["chat"]["id"])
+            chat_id = int(json.loads(flask.request.data)
+                          ["message"]["chat"]["id"])
             text = str(json.loads(flask.request.data)["message"]["text"])
 
             # Un nuevo mensaje que no de ninguno de los dos grupos
-            if chat_id != admin_group and chat_id != public_gruop and not text.startswith("/"):
+            if chat_id != admin_group and chat_id != public_gruop and not \
+                    text.startswith("/"):
 
                 # le mando el mensaje a los admin y guardo este con un id único
                 id_ = next(message_id)
                 messages[id_] = text
-                send_message(template_admin.format(str(id_), text), admin_group, True)
+                send_message(template_admin.format(
+                    str(id_), text), admin_group, True)
 
             # Si el mensaje viene del grupo de admin
             elif chat_id == admin_group:
@@ -82,7 +87,8 @@ def telegram_bot():
                 elif text.lower().startswith("/set"):
                     new_id = int(text.replace("/set ", ""))
                     tag_message = new_id
-                    send_message("ID de los mensajes seteado en {}".format(tag_message), admin_group)
+                    send_message("ID de los mensajes seteado en {}".format(
+                        tag_message), admin_group)
 
                 elif text.lower().startswith("/r"):
                     text = text.replace("/r ", "")
@@ -94,12 +100,19 @@ def telegram_bot():
                         command, id_ = text.strip().split(" ")
                         id_ = int(id_)
                         if id_ in messages:
-                            send_message(template_public.format(tag_message, messages[id_]),
-                                         public_gruop,
-                                         True)
-                            send_message(template_public.format(tag_message, messages[id_]),
-                                         channel,
-                                         True)
+                            send_message(
+                                template_public.format(
+                                    tag_message, messages[id_]
+                                ),
+                                public_gruop,
+                                True)
+                            send_message(
+                                template_public.format(
+                                    tag_message, messages[id_]
+                                ),
+                                channel,
+                                True,
+                            )
 
                             del messages[id_]
                             tag_message += 1
@@ -120,9 +133,11 @@ def telegram_bot():
                         id_ = int(id_)
                         if id_ in messages:
                             del messages[id_]
-                            send_message("Mensaje con id {} fue rechazado".format(id_),
-                                         admin_group,
-                                         True)
+                            send_message(
+                                "Mensaje con id {} fue rechazado".format(id_),
+                                admin_group,
+                                True
+                            )
                     except ValueError:
                         send_message("No se pudo procesar la respuesta",
                                      admin_group,
@@ -136,6 +151,6 @@ def telegram_bot():
         # Si es que se genera un error que no deja aceptar más mensajes
         return "None"
 
+
 if __name__ == '__main__':
     app.run()
-
