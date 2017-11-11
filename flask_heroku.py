@@ -15,7 +15,7 @@ groups = (admin_group, public_group)
 
 app = Flask(__name__)
 messages = {}
-cmd = r"(/[a-zA-Z]*)(?:\s)?(\S*)"
+cmd = r"(/[a-zA-Z]*)(?:\s)?(.*)"
 
 
 def id_generator():
