@@ -167,6 +167,8 @@ def telegram_bot():
                     True,
                  )
             return resp["completed"]
+        
+        return resp["ignored"]
 
     except Exception as e:
         print("ERROR EN EL BOT\n{}".format(e))
