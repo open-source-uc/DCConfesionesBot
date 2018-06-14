@@ -1,31 +1,59 @@
 # coding=utf-8
 from flask import Flask, request
 from json import loads as load_json
-from messenger import Messenger
-from templates import *
 import os
 import re
+import requests
+from sheets import get_sheet_info, write, write_message, get_sheet_message, delete_row, delete_all, write_message_accepted
 
 # env vars
 TOKEN = os.environ["token"]
 admin_group = int(os.environ["admin_group"])
 public_group = int(os.environ["public_group"])
 channel = int(os.environ["channel"])
+
 groups = (admin_group, public_group)
 
 app = Flask(__name__)
-messages = {}
+
 cmd = r"(/[a-zA-Z]*)(?:\s)?(.*)"
 
 
-def id_generator():
-    n = 1
-    while True:
-        yield n
-        n += 1
+def send_message(text, id_, markdown=False):
+    url = "https://api.telegram.org/bot{}/".format(TOKEN)
+    params = {
+        "method": "sendMessage",
+        "text": text,
+        "chat_id": id_,
+    }
+    if markdown:
+        params["parse_mode"] = "Markdown"
+        params["disable_web_page_preview"] = "True"
+    return requests.get(url, params=(params))
 
 
-message_id = id_generator()
+def send_photo(message_id, photo_id, id_):
+    url = "https://api.telegram.org/bot{}/".format(TOKEN)
+    params = {
+        "method": "sendPhoto",
+        "photo": photo_id,
+        "chat_id": id_,
+        'caption': 'Nuevo Mensaje id: {}'.format(message_id)
+    }
+
+    return requests.get(url, params=(params))
+
+
+def send_photo_public(message_id, photo_id, id_):
+    url = "https://api.telegram.org/bot{}/".format(TOKEN)
+    params = {
+        "method": "sendPhoto",
+        "photo": photo_id,
+        "chat_id": id_,
+        'caption': 'DCConfesión #{}'.format(message_id)
+    }
+
+    return requests.get(url, params=(params))
 
 # Responses
 resp = {
@@ -34,29 +62,56 @@ resp = {
     "error": "Error",
 }
 
-messenger = Messenger(TOKEN, admin_group, public_group, channel)
+# Templates
+template_admin = "*Nuevo Mensaje\tid:* {}\n{}"
+template_public = "*DCConfesión #{} * \n{}"
+template_admin_message = "*Admin:* {}"
 
-tag_message = 1
-messenger.send_admin(template_reboot, True)
+datos = get_sheet_info()
+messages = get_sheet_message()
+print(messages)
+
+tag_message = int(datos[0][0])
+message_id = int(datos[0][1])
+#send_message("*Me han reiniciado :(, Las confesiones anteriores se perdieron*".format(tag_message), admin_group, True)
 
 
 @app.route("/Bot", methods=["POST", "GET"])
 def telegram_bot():
     try:
         request_data = load_json(request.data)
+        is_photo = False
 
         if "edited_message" in request_data:
             return resp["ignored"]
 
         chat_id = int(request_data["message"]["chat"]["id"])
-        text = str(request_data["message"]["text"])
+
+        if 'photo' in request_data["message"]:
+            text = str(request_data["message"]["photo"][-1]['file_id'])
+            is_photo = True
+        else:
+            text = str(request_data["message"]["text"])
 
         # Un nuevo mensaje que no de ninguno de los dos grupos
         if chat_id not in groups and not text.startswith("/"):
+            global message_id, tag_message
             # le mando el mensaje a los admin y guardo este con un id único
-            id_ = next(message_id)
-            messages[id_] = text
-            messenger.send_admin(template_admin.format(str(id_), text), True)
+            message_id += 1
+            id_ = message_id
+            write([tag_message, message_id])
+            write_message([message_id, text, is_photo])
+            messages[id_] = [text, is_photo]
+            if is_photo:
+                send_photo(str(id_), text, admin_group)
+            else:
+                send_message(template_admin.format(
+                    str(id_),
+                    text
+                ), admin_group, True)
+            print(messages)
+
+
             return resp["completed"]
 
         # Si el mensaje viene del grupo de admin
@@ -71,60 +126,92 @@ def telegram_bot():
             def get_message(id_):
                 id_ = int(id_)
                 if id_ in messages:
-                    text = messages[id_]
-                    messenger.send_admin(
-                        template_get.format(str(id_), text),
-                        True,
-                    )
+                    send_message(messages[id_], admin_group)
 
             def get_all_messages(_):
                 if not messages:
-                    messenger.send_admin(template_no_pending)
+                    send_message("No hay mensajes pendientes", admin_group)
                 else:
                     text = ", ".join([str(k) for k in messages])
-                    messenger.send_admin(template_pending.format(text), True)
+                    send_message(text, admin_group)
 
             def set_tag(new_id):
-                global tag_message
+                global tag_message, message_id
                 tag_message = int(new_id)
-                messenger.send_admin(template_set_id.format(tag_message))
+                send_message(
+                    "ID de los mensajes seteado en {}".format(tag_message),
+                    admin_group,
+                )
+                write([tag_message, message_id])
 
             def admin_response(text):
-                message = template_response.format(text)
-                messenger.send_public(message, True)
+                message = template_admin_message.format(text)
+                send_message(message, public_group, True)
+                send_message(message, channel, True)
 
             def approve_message(id_):
                 if not id_:
                     return
 
-                global tag_message
+                global message_id, tag_message
+
                 id_ = int(id_)
                 if id_ not in messages:
                     return
-                message = template_public.format(
-                    tag_message,
-                    messages[id_]
-                )
-                messenger.send_public(message, True)
+
+                if messages[id_][1]:# is_photo
+                    send_photo_public(tag_message, messages[id_][0], public_group)
+                    send_photo_public(tag_message, messages[id_][0], channel)
+                    write_message_accepted([tag_message, messages[id_][0]])
+
+                else:
+                    message = template_public.format(
+                        tag_message,
+                        messages[id_][0]
+                    )
+                    send_message(message, public_group, True)
+                    send_message(message, channel, True)
+                    write_message_accepted([tag_message, messages[id_][0]])
+
                 del messages[id_]
+                delete_row(id_)
+                if len(messages) == 0:
+                    message_id = 0
+                # Eliminar mesaje de los pendientes
                 tag_message += 1
+                write([tag_message, message_id])
 
             def reject_messages(argument):
+                global message_id, tag_message
+
                 if not argument:
                     return
                 elif argument == "all":
                     messages.clear()
-                    messenger.send_admin(template_deleted_all, True)
+                    message_id = 0
+                    write([tag_message, message_id])
+                    # Eliminar mesaje de los pendientes, todos!!!
+                    send_message("Mensajes eliminados", admin_group, True)
+                    delete_all()
                     return
                 else:
                     id_ = int(argument)
                     if id_ not in messages:
                         return
                     del messages[id_]
-                    messenger.send_admin(template_deleted.format(id_), True)
+                    send_message(
+                        "Mensaje con id {} fue rechazado".format(id_),
+                        admin_group,
+                        True,
+                    )
+                    delete_row(id_)
+                    if len(messages) == 0:
+                        message_id = 0
+                        write([tag_message, message_id])
+                    # Eliminar mesaje de los pendientes
 
             def wrong_command(_):
-                messenger.send_admin(template_wrong_command, True)
+                send_message("No existe este comando", admin_group, True)
 
             try:
                 {
@@ -136,9 +223,13 @@ def telegram_bot():
                     "/no": reject_messages,
                 }.get(command, wrong_command)(argument)
             except ValueError:
-                messenger.send_admin(template_unproccesed, True)
+                send_message(
+                    "No se pudo procesar el comando",
+                    admin_group,
+                    True,
+                 )
             return resp["completed"]
-
+        
         return resp["ignored"]
 
     except Exception as e:
