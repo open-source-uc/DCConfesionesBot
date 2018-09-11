@@ -19,7 +19,7 @@ app = Flask(__name__)
 cmd = r"(/[a-zA-Z]*)(?:\s)?(.*)"
 
 
-def send_message(text, id_, markdown=False):
+def send_message(text, id_, markdown=True):
     url = "https://api.telegram.org/bot{}/".format(TOKEN)
     params = {
         "method": "sendMessage",
@@ -32,19 +32,22 @@ def send_message(text, id_, markdown=False):
     return requests.get(url, params=(params))
 
 
-def send_photo(message_id, photo_id, id_):
+def send_photo(message_id, photo_id, id_, caption):
     url = "https://api.telegram.org/bot{}/".format(TOKEN)
+    
     params = {
         "method": "sendPhoto",
         "photo": photo_id,
         "chat_id": id_,
         'caption': 'Nuevo Mensaje id: {}'.format(message_id)
     }
+    if caption:
+        params['caption'] += "\n\n{}".format(caption)
 
     return requests.get(url, params=(params))
 
 
-def send_photo_public(message_id, photo_id, id_):
+def send_photo_public(message_id, photo_id, id_, caption):
     url = "https://api.telegram.org/bot{}/".format(TOKEN)
     params = {
         "method": "sendPhoto",
@@ -52,6 +55,8 @@ def send_photo_public(message_id, photo_id, id_):
         "chat_id": id_,
         'caption': 'DCConfesión #{}'.format(message_id)
     }
+    if caption:
+        params['caption'] += "\n\n{}".format(caption)
 
     return requests.get(url, params=(params))
 
@@ -87,8 +92,11 @@ def telegram_bot():
 
         chat_id = int(request_data["message"]["chat"]["id"])
 
+        caption = None
         if 'photo' in request_data["message"]:
             text = str(request_data["message"]["photo"][-1]['file_id'])
+            if 'caption' in request_data["message"]:
+                caption = str(request_data["message"]['caption'])
             is_photo = True
         else:
             text = str(request_data["message"]["text"])
@@ -100,10 +108,10 @@ def telegram_bot():
             message_id += 1
             id_ = message_id
             write([tag_message, message_id])
-            write_message([message_id, text, is_photo])
-            messages[id_] = [text, is_photo]
+            write_message([message_id, text, is_photo, caption])
+            messages[id_] = [text, is_photo, caption]
             if is_photo:
-                send_photo(str(id_), text, admin_group)
+                send_photo(str(id_), text, admin_group, caption)
             else:
                 send_message(template_admin.format(
                     str(id_),
@@ -150,19 +158,49 @@ def telegram_bot():
                 send_message(message, channel, True)
 
             def approve_message(id_):
+                global message_id, tag_message
+                
                 if not id_:
                     return
 
-                global message_id, tag_message
+                elif argument == "all":
+                    print("Aceptando todo")
+                    for id_ in messages:
+                        if messages[id_][1]:# is_photo
+                            send_photo_public(tag_message, messages[id_][0], public_group, messages[id_][2])
+                            send_photo_public(tag_message, messages[id_][0], channel, messages[id_][2])
+                            write_message_accepted([tag_message, messages[id_][0], messages[id_][2]])
+
+                        else:
+                            message = template_public.format(
+                                tag_message,
+                                messages[id_][0]
+                            )
+                            send_message(message, public_group, True)
+                            send_message(message, channel, True)
+                            write_message_accepted([tag_message, messages[id_][0]])
+
+                        tag_message += 1
+
+
+                    messages.clear()
+                    message_id = 0
+                    write([tag_message, message_id])
+                    # Eliminar mesaje de los pendientes, todos!!!
+                    send_message("Mensajes aceptados", admin_group, True)
+                    delete_all()
+                    return 
+
+                
 
                 id_ = int(id_)
                 if id_ not in messages:
                     return
 
                 if messages[id_][1]:# is_photo
-                    send_photo_public(tag_message, messages[id_][0], public_group)
-                    send_photo_public(tag_message, messages[id_][0], channel)
-                    write_message_accepted([tag_message, messages[id_][0]])
+                    send_photo_public(tag_message, messages[id_][0], public_group, messages[id_][2])
+                    send_photo_public(tag_message, messages[id_][0], channel, messages[id_][2])
+                    write_message_accepted([tag_message, messages[id_][0], messages[id_][2]])
 
                 else:
                     message = template_public.format(
@@ -236,7 +274,7 @@ def telegram_bot():
         print("ERROR EN EL BOT\n{}".format(e))
         # Si es que se genera un error que no deja aceptar más mensajes
         return resp["error"]
-
+        
 
 if __name__ == "__main__":
     app.run()

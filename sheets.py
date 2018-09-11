@@ -77,7 +77,10 @@ def get_sheet_message():
         data = {}
         for messages in values:
             if messages[2] == "TRUE":
-                data[int(messages[0])] = [messages[1], True]
+                caption = None
+                if len(messages) == 4:
+                    caption =  messages[3]
+                data[int(messages[0])] = [messages[1], True, caption]
             else:
                 data[int(messages[0])] = [messages[1], False]
         return data
